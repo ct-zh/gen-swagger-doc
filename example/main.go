@@ -7,6 +7,7 @@ func main() {
 	r.GET("/ping", Pong)
 	r.Run()
 }
+
 // @Router /ping [get]
 func Pong(c *gin.Context) {
 	c.JSON(200, gin.H{
