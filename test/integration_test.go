@@ -92,7 +92,7 @@ func main() {
 			},
 		},
 		{
-			name: "同名函数干扰 (不同 Receiver)",
+			name: "同名函数支持 (两个都注册)",
 			files: map[string]string{
 				"main.go": `
 package main
@@ -105,13 +105,17 @@ func (b *B) List(c *gin.Context) {}
 
 func main() {
 	a := &A{}
+	b := &B{}
 	r := gin.Default()
-	r.GET("/a", a.List) // 应该只给 A.List 加注释
+	r.GET("/a", a.List)
+	r.GET("/b", b.List)
 }
 `,
 			},
-			// MVP 限制: 无法区分同名函数，为了安全起见，跳过注入
-			expectNoMatch: []string{"@Router"},
+			expectMatches: []string{
+				"// @Router /a [get]", // A.List
+				"// @Router /b [get]", // B.List
+			},
 		},
 		{
 			name: "缺少 Handler 参数",

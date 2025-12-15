@@ -9,6 +9,7 @@ import (
 type Context struct {
 	FileSet *token.FileSet // 用于获取文件位置信息
 	Node    ast.Node       // 当前正在处理的 AST 节点 (通常是 *ast.CallExpr)
+	File    *ast.File      // 当前正在处理的文件 (AST Root)
 	PkgName string         // 当前包名
 }
 
@@ -51,10 +52,23 @@ type Handler interface {
 	// 这是一个标记接口，目前为空
 }
 
+// HandlerInfo 包含 Handler 的详细定位信息
+type HandlerInfo struct {
+	PkgName      string // 包名 (e.g., "main", "user")
+	FunctionName string // 函数名 (e.g., "List", "Create")
+	ReceiverType string // 接收者类型名 (e.g., "UserAPI", "OrderAPI")，如果是普通函数则为空
+}
+
 // --- Optional Parsers (Mix-ins) ---
 // Handler 实现类可以选择性地实现以下接口，以提供特定的解析能力。
 
+// HandlerInfoProvider 提供获取路由处理函数详细信息的能力
+type HandlerInfoProvider interface {
+	GetHandlerInfo(ctx *Context) HandlerInfo
+}
+
 // HandlerNameProvider 提供获取路由处理函数名称的能力
+// Deprecated: Use HandlerInfoProvider instead
 type HandlerNameProvider interface {
 	GetHandlerName(ctx *Context) string
 }

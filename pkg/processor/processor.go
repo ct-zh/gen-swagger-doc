@@ -26,10 +26,9 @@ func Run(opts Options) error {
 	fset := token.NewFileSet()
 
 	// 1. 收集阶段：找到所有路由注册信息
-	// Map: HandlerName -> RouteInfo
+	// Map: HandlerKey -> RouteInfo
+	// Key format: PkgName.ReceiverType.FuncName
 	routeMap := make(map[string]driver.RouteInfo)
-	// Map: FuncName -> Count (用于检测同名函数冲突)
-	funcCount := make(map[string]int)
 
 	err := filepath.Walk(opts.WorkDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -48,14 +47,10 @@ func Run(opts Options) error {
 		pkgName := f.Name.Name
 
 		ast.Inspect(f, func(n ast.Node) bool {
-			// 统计函数定义
-			if fn, ok := n.(*ast.FuncDecl); ok {
-				funcCount[fn.Name.Name]++
-			}
-
 			ctx := &driver.Context{
 				FileSet: fset,
 				Node:    n,
+				File:    f,
 				PkgName: pkgName,
 			}
 
@@ -64,20 +59,27 @@ func Run(opts Options) error {
 				return true
 			}
 
-			// 提取 Handler 名称
-			var handlerName string
-			if nameProvider, ok := handler.(driver.HandlerNameProvider); ok {
-				handlerName = nameProvider.GetHandlerName(ctx)
+			// 提取 Handler 信息
+			var handlerInfo driver.HandlerInfo
+			if infoProvider, ok := handler.(driver.HandlerInfoProvider); ok {
+				handlerInfo = infoProvider.GetHandlerInfo(ctx)
+			} else if nameProvider, ok := handler.(driver.HandlerNameProvider); ok {
+				// Fallback for legacy drivers
+				handlerInfo = driver.HandlerInfo{
+					PkgName:      pkgName,
+					FunctionName: nameProvider.GetHandlerName(ctx),
+				}
 			}
 
-			if handlerName == "" {
+			if handlerInfo.FunctionName == "" {
 				return true
 			}
 
 			// 提取路由信息
 			if routerParser, ok := handler.(driver.RouterParser); ok {
 				routeInfo := routerParser.ParseRouter(ctx)
-				routeMap[handlerName] = routeInfo
+				key := makeHandlerKey(handlerInfo)
+				routeMap[key] = routeInfo
 			}
 
 			return true
@@ -110,6 +112,7 @@ func Run(opts Options) error {
 			return err
 		}
 
+		pkgName := f.Name.Name
 		var modified bool
 
 		ast.Inspect(f, func(n ast.Node) bool {
@@ -118,27 +121,22 @@ func Run(opts Options) error {
 				return true
 			}
 
-			handlerName := fn.Name.Name
-			routeInfo, exists := routeMap[handlerName]
-			if !exists {
-				return true
-			}
+			receiverType := getReceiverTypeName(fn)
+			key := makeHandlerKey(driver.HandlerInfo{
+				PkgName:      pkgName,
+				ReceiverType: receiverType,
+				FunctionName: fn.Name.Name,
+			})
 
-			// 如果存在同名函数，跳过注入以避免错误
-			if funcCount[handlerName] > 1 {
-				fmt.Printf("Warning: Ambiguous handler name %q (found %d times), skipping injection\n", handlerName, funcCount[handlerName])
+			routeInfo, exists := routeMap[key]
+			if !exists {
 				return true
 			}
 
 			// 找到目标函数，开始注入注释
 			if injectComments(fn, routeInfo) {
 				modified = true
-				fmt.Printf("Injecting docs for %s\n", handlerName)
-				// 清除函数声明的位置信息，强制 printer 根据 AST 结构重新排版
-				// 这样可以避免因插入注释导致的偏移量冲突
-				// fn.Pos = token.NoPos // 这是一个只读方法，不能赋值
-				// 我们需要修改结构体字段，但在 AST 接口中 Pos() 是方法
-				// 对于 FuncDecl: Type, Name, Doc 等都有 Pos。
+				fmt.Printf("Injecting docs for %s (Key: %s)\n", fn.Name.Name, key)
 			}
 
 			return true
@@ -185,6 +183,19 @@ func injectComments(fn *ast.FuncDecl, route driver.RouteInfo) bool {
 			// Slash: fn.Pos() - 1, // 移除 Hack，看看原始行为
 			Text: "// " + line,
 		})
+	}
+
+	// 强制清除 Func 关键字和函数名的位置信息，使 printer 重新排版
+	// 这样可以确保新添加的 Doc 注释被正确打印
+	if fn.Type != nil {
+		fn.Type.Func = token.NoPos
+	}
+	if fn.Name != nil {
+		fn.Name.NamePos = token.NoPos
+	}
+	if fn.Recv != nil {
+		fn.Recv.Opening = token.NoPos
+		fn.Recv.Closing = token.NoPos
 	}
 
 	return true
