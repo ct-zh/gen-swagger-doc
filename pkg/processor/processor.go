@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"gen-swagger-doc/pkg/driver"
+	"gen-swagger-doc/pkg/generator"
 )
 
 // Options 运行参数
@@ -161,17 +162,17 @@ func Run(opts Options) error {
 // injectComments 注入 Swagger 注释
 // 返回 true 表示是否有修改
 func injectComments(fn *ast.FuncDecl, route driver.RouteInfo) bool {
-	// 简单的注释生成逻辑 (MVP)
-	// TODO: 后面会由 generator 模块接管
-	newComments := []string{
-		fmt.Sprintf("// @Router %s [%s]", route.Path, strings.ToLower(route.Method)),
-	}
+	// 调用 Generator 生成标准注释
+	// 目前 params 和 responses 为空，后续会从 Driver 中获取
+	// TODO: 从 Driver 获取 Params 和 Responses
+	rawLines := generator.GenerateSwaggerDocs(route, nil, nil)
 
 	if fn.Doc == nil {
 		fn.Doc = &ast.CommentGroup{}
 	}
 
 	// 检查是否已经存在 @Router 注释，避免重复添加
+	// 如果存在，我们假设整个 Swagger 块都已经存在，暂时不做增量更新
 	for _, c := range fn.Doc.List {
 		if strings.Contains(c.Text, "@Router") {
 			return false // 已经有了，跳过
@@ -179,10 +180,10 @@ func injectComments(fn *ast.FuncDecl, route driver.RouteInfo) bool {
 	}
 
 	// 追加注释
-	for _, text := range newComments {
+	for _, line := range rawLines {
 		fn.Doc.List = append(fn.Doc.List, &ast.Comment{
 			// Slash: fn.Pos() - 1, // 移除 Hack，看看原始行为
-			Text: text,
+			Text: "// " + line,
 		})
 	}
 

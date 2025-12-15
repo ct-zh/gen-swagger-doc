@@ -1,6 +1,6 @@
 # Module: Processor Design
 
-**Status**: Ready for Dev
+**Status**: In Progress
 **Author**: System Architect
 **Module Path**: `pkg/processor`
 
@@ -19,45 +19,41 @@ type Options struct {
 
 ### 2.2 Execution Flow
 1.  `Run(opts)` 启动。
-2.  使用 `filepath.Walk` 遍历 `WorkDir`。
-3.  对每个 `.go` 文件调用 `processFile`。
-4.  `processFile` 解析 AST。
-5.  遍历 AST，对每个节点调用 `opts.Driver.CheckNode`。
-6.  如果发现路由 (Handler != nil)：
-    *   使用 `RouterParser` 提取 URL/Method。
+2.  **Phase 1 (Collection)**:
+    *   遍历所有 `.go` 文件。
+    *   统计 `FuncDecl` 出现次数 (用于检测同名函数冲突)。
+    *   使用 `Driver` 解析路由注册代码，建立 `HandlerName -> RouteInfo` 映射。
+3.  **Phase 2 (Injection)**:
+    *   再次遍历所有 `.go` 文件 (使用新的 `FileSet` 以避免偏移量问题)。
     *   找到对应的 Handler 函数定义 (`*ast.FuncDecl`)。
+    *   检查是否存在同名函数冲突 (Ambiguous Handler)。如果是，跳过并警告。
     *   生成 Swagger 注释 (调用 `pkg/generator`)。
     *   将注释附加到 `FuncDecl.Doc`。
-7.  如果文件被修改，使用 `go/format` 写回磁盘。
+    *   如果文件被修改，使用 `go/format` 写回磁盘。
 
 ## 3. Key Challenges & Solutions
 
 ### 3.1 Finding the Handler Function
 Driver 返回的是路由注册点（e.g., `r.GET`），但我们需要给 Handler 函数（e.g., `func Pong(...)`）加注释。
 **解决方案**:
-1.  Driver 需要返回 Handler 函数的名称 (这需要扩展 GinDriver 的能力，或者在 Processor 层做简单的 Ident 提取)。
+1.  Driver 需要返回 Handler 函数的名称。
 2.  在当前包的 AST 中查找名为 `Pong` 的 `FuncDecl`。
 3.  *MVP 限制*: 暂时只支持 Handler 函数在同一个包内。
+4.  *MVP 限制*: 如果存在同名函数（例如不同结构体的同名方法），暂不支持区分，直接跳过以保证安全。
 
 ## 4. Tasks (研发任务)
 
 请 **研发工程师** 按以下步骤完成代码编写：
 
-- [ ] **Task 1**: 创建 `pkg/processor/processor.go`。定义 `Options` 和 `Run` 函数。
-- [ ] **Task 2**: 实现 AST 遍历逻辑。
-- [ ] **Task 3**: 实现简单的注释生成逻辑 (暂时硬编码，或者简单的字符串拼接)。
-- [ ] **Task 4**: 实现 AST 修改和回写逻辑。
+- [x] **Task 1**: 创建 `pkg/processor/processor.go`。定义 `Options` 和 `Run` 函数。
+- [x] **Task 2**: 实现 AST 遍历逻辑和 Handler 查找。
+- [x] **Task 3**: 实现简单的注释生成逻辑 (目前是硬编码)。
+- [x] **Task 4**: 实现 AST 修改和回写逻辑 (已解决 FileSet 偏移量 Bug)。
+- [x] **Task 5**: 实现同名函数冲突检测 (Ambiguous Handler Check)。
+- [x] **Task 6**: 集成 `pkg/generator` 模块。
+    - 将硬编码的 `// @Router` 生成逻辑替换为调用 `generator.GenerateSwaggerDocs`。
+- [ ] **Task 7**: 优化：支持跨文件/跨包查找 Handler (V2 规划)。
 
 **注意**:
-目前 `GinDriver` 的 `ParseRouter` 只返回了 Path/Method，没有返回 Handler 函数名。
-你需要修改 `pkg/driver/interface.go` 中的 `RouteInfo` 或者 `Handler` 接口，以便 Processor 知道去哪里加注释。
-**架构师修正**: 建议在 `driver.Handler` 接口中增加一个可选接口 `HandlerNameParser`，或者直接在 `GinHandler` 中暴露获取函数名的方法。
-为了保持通用性，我们定义一个新的 Mix-in:
-
-```go
-// pkg/driver/interface.go (Update required)
-type HandlerNameProvider interface {
-    GetHandlerName(ctx *Context) string
-}
-```
-(请研发工程师先在 interface.go 中添加这个接口，然后更新 GinDriver 实现它)
+目前 `Processor` 已经能够通过集成测试 `test/integration_test.go`。
+接下来的重点是接入 `pkg/generator` 以生成完整的注释块。

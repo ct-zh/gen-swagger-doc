@@ -66,7 +66,10 @@ func main() {
 			// 目前逻辑: GetHandlerName 支持 SelectorExpr (api.Create -> Create)
 			// 但是 injectComments 需要匹配 FuncDecl，"Create" 对应 func (u *UserAPI) Create...
 			// 我们的 Processor 只是简单匹配 FuncDecl.Name.Name，所以应该能匹配到 "Create"
-			expectMatches: []string{"// @Router /users [post]"},
+			expectMatches: []string{
+				"// @Summary POST /users",
+				"// @Router /users [post]",
+			},
 		},
 		{
 			name: "单个 List 函数",
@@ -83,7 +86,10 @@ func main() {
 }
 `,
 			},
-			expectMatches: []string{"// @Router /a [get]"},
+			expectMatches: []string{
+				"// @Summary GET /a",
+				"// @Router /a [get]",
+			},
 		},
 		{
 			name: "同名函数干扰 (不同 Receiver)",
