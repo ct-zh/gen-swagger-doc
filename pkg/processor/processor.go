@@ -46,6 +46,21 @@ func Run(opts Options) error {
 
 		pkgName := f.Name.Name
 
+		// 优先使用 FileParser
+		if fileParser, ok := opts.Driver.(driver.FileParser); ok {
+			ctx := &driver.Context{
+				FileSet: fset,
+				File:    f,
+				PkgName: pkgName,
+			}
+			parsedRoutes := fileParser.ParseFile(ctx)
+			for _, pr := range parsedRoutes {
+				key := makeHandlerKey(pr.HandlerInfo)
+				routeMap[key] = pr.RouteInfo
+			}
+			return nil
+		}
+
 		ast.Inspect(f, func(n ast.Node) bool {
 			ctx := &driver.Context{
 				FileSet: fset,
@@ -134,7 +149,14 @@ func Run(opts Options) error {
 			}
 
 			// 找到目标函数，开始注入注释
-			if injectComments(fn, routeInfo) {
+			var params []driver.ParamInfo
+			var responses []driver.ResponseInfo
+
+			if analyzer, ok := opts.Driver.(driver.FuncBodyAnalyzer); ok {
+				params, responses = analyzer.AnalyzeFunction(fn)
+			}
+
+			if injectComments(f, fn, routeInfo, params, responses) {
 				modified = true
 				fmt.Printf("Injecting docs for %s (Key: %s)\n", fn.Name.Name, key)
 			}
@@ -159,14 +181,16 @@ func Run(opts Options) error {
 
 // injectComments 注入 Swagger 注释
 // 返回 true 表示是否有修改
-func injectComments(fn *ast.FuncDecl, route driver.RouteInfo) bool {
+func injectComments(file *ast.File, fn *ast.FuncDecl, route driver.RouteInfo, params []driver.ParamInfo, responses []driver.ResponseInfo) bool {
 	// 调用 Generator 生成标准注释
-	// 目前 params 和 responses 为空，后续会从 Driver 中获取
-	// TODO: 从 Driver 获取 Params 和 Responses
-	rawLines := generator.GenerateSwaggerDocs(route, nil, nil)
+	rawLines := generator.GenerateSwaggerDocs(route, params, responses)
 
 	if fn.Doc == nil {
 		fn.Doc = &ast.CommentGroup{}
+		// 关键修复: 如果创建了新的 Doc，必须将其添加到 file.Comments 中，
+		// 否则 go/format 打印 *ast.File 时会忽略这些“孤立”的注释。
+		// 注意: 这可能会打乱注释顺序，但由于我们稍后重置了 Pos，go/format 应该会根据 AST 结构打印。
+		file.Comments = append(file.Comments, fn.Doc)
 	}
 
 	// 检查是否已经存在 @Router 注释，避免重复添加
