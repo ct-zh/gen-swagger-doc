@@ -62,6 +62,137 @@ func (d *GinDriver) CheckNode(ctx *driver.Context) (driver.Handler, bool) {
 	}, true
 }
 
+// AnalyzeFunction 分析函数体以提取参数和响应信息
+func (d *GinDriver) AnalyzeFunction(fn *ast.FuncDecl) ([]driver.ParamInfo, []driver.ResponseInfo) {
+	// 1. 找到 gin.Context 的参数名
+	ctxParamName := ""
+	for _, field := range fn.Type.Params.List {
+		// 检查类型是否为 *gin.Context
+		if isGinContextType(field.Type) {
+			if len(field.Names) > 0 {
+				ctxParamName = field.Names[0].Name
+				break
+			}
+		}
+	}
+
+	if ctxParamName == "" {
+		return nil, nil
+	}
+
+	var params []driver.ParamInfo
+	var responses []driver.ResponseInfo
+	// 用 map 去重
+	paramMap := make(map[string]bool)
+
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+
+		// 检查接收者是否是 context 变量
+		if x, ok := sel.X.(*ast.Ident); !ok || x.Name != ctxParamName {
+			return true
+		}
+
+		// 匹配方法名
+		switch sel.Sel.Name {
+		// Query Params
+		case "Query", "DefaultQuery":
+			if len(call.Args) > 0 {
+				if name := extractStringLit(call.Args[0]); name != "" {
+					if !paramMap[name] {
+						params = append(params, driver.ParamInfo{
+							Name:     name,
+							In:       "query",
+							Type:     "string",
+							Required: false,
+						})
+						paramMap[name] = true
+					}
+				}
+			}
+		// Path Params
+		case "Param":
+			if len(call.Args) > 0 {
+				if name := extractStringLit(call.Args[0]); name != "" {
+					if !paramMap[name] {
+						params = append(params, driver.ParamInfo{
+							Name:     name,
+							In:       "path",
+							Type:     "string",
+							Required: true,
+						})
+						paramMap[name] = true
+					}
+				}
+			}
+		// Body (JSON)
+		case "BindJSON", "ShouldBindJSON":
+			if len(call.Args) > 0 {
+				// c.BindJSON(&req) -> 提取 req 的类型
+				varName := extractVarNameFromExpr(call.Args[0])
+				if varName != "" {
+					typeName := resolveVariableType(fn, varName)
+					if typeName != "" {
+						params = append(params, driver.ParamInfo{
+							Name:     "body", // Swagger standard for body param name
+							In:       "body",
+							Schema:   typeName,
+							Required: true,
+						})
+					}
+				}
+			}
+
+		// Responses
+		case "JSON":
+			if len(call.Args) >= 2 {
+				// code
+				code := extractIntLit(call.Args[0])
+				// obj
+				// 1. 尝试直接从表达式提取类型 (e.g. UserResponse{})
+				typeName := extractTypeFromExpr(call.Args[1])
+
+				// 2. 如果是变量，尝试解析变量类型
+				varName := extractVarNameFromExpr(call.Args[1])
+				if varName != "" {
+					resolved := resolveVariableType(fn, varName)
+					if resolved != "" {
+						typeName = resolved
+					}
+				}
+
+				// Check if existing response for this code
+				exists := false
+				for _, r := range responses {
+					if r.Code == code {
+						exists = true
+						break
+					}
+				}
+				if !exists {
+					responses = append(responses, driver.ResponseInfo{
+						Code:   code,
+						Schema: typeName,
+						Desc:   "OK",
+					})
+				}
+			}
+		}
+
+		return true
+	})
+
+	return params, responses
+}
+
 // GinHandler 实现了 driver.Handler 和 driver.RouterParser
 type GinHandler struct {
 	ctx  *driver.Context
@@ -226,4 +357,126 @@ func extractTypeFromExpr(expr ast.Expr) string {
 		return extractTypeFromExpr(t.X)
 	}
 	return ""
+}
+
+// isGinContextType 检查类型是否为 *gin.Context
+func isGinContextType(expr ast.Expr) bool {
+	// 简单检查是否为 *gin.Context 或 *Context (假设导入别名)
+	// 也可以检查包名是否包含 "gin"
+	star, ok := expr.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := star.X.(*ast.SelectorExpr)
+	if !ok {
+		return false // maybe just *Context if in same package? Unlikely for gin.
+	}
+
+	// Check if selector is "gin.Context"
+	if x, ok := sel.X.(*ast.Ident); ok {
+		// loose check: package name contains "gin" or is "gin"
+		if strings.Contains(strings.ToLower(x.Name), "gin") && sel.Sel.Name == "Context" {
+			return true
+		}
+	}
+	return false
+}
+
+func extractStringLit(expr ast.Expr) string {
+	if lit, ok := expr.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+		v, _ := strconv.Unquote(lit.Value)
+		return v
+	}
+	return ""
+}
+
+func extractIntLit(expr ast.Expr) int {
+	// e.g. http.StatusOK or 200
+	if lit, ok := expr.(*ast.BasicLit); ok && lit.Kind == token.INT {
+		v, _ := strconv.Atoi(lit.Value)
+		return v
+	}
+	// Handle constants like http.StatusOK
+	if sel, ok := expr.(*ast.SelectorExpr); ok {
+		// Map common status codes
+		switch sel.Sel.Name {
+		case "StatusOK":
+			return 200
+		case "StatusCreated":
+			return 201
+		case "StatusBadRequest":
+			return 400
+		case "StatusUnauthorized":
+			return 401
+		case "StatusForbidden":
+			return 403
+		case "StatusNotFound":
+			return 404
+		case "StatusInternalServerError":
+			return 500
+		}
+	}
+	return 200 // Default
+}
+
+// extractVarNameFromExpr 从表达式中提取变量名
+// e.g. &req -> req
+func extractVarNameFromExpr(expr ast.Expr) string {
+	switch t := expr.(type) {
+	case *ast.UnaryExpr:
+		// &req
+		if t.Op == token.AND {
+			return extractVarNameFromExpr(t.X)
+		}
+	case *ast.Ident:
+		// req
+		return t.Name
+	}
+	return ""
+}
+
+// resolveVariableType 在函数体中解析变量的类型
+func resolveVariableType(fn *ast.FuncDecl, varName string) string {
+	var typeName string
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if typeName != "" {
+			return false // 已找到
+		}
+
+		switch stmt := n.(type) {
+		case *ast.AssignStmt:
+			// req := Request{}
+			for i, lhs := range stmt.Lhs {
+				if ident, ok := lhs.(*ast.Ident); ok && ident.Name == varName {
+					// 找到赋值，查看右边
+					if i < len(stmt.Rhs) {
+						rhs := stmt.Rhs[i]
+						typeName = extractTypeFromExpr(rhs)
+					}
+				}
+			}
+		case *ast.DeclStmt:
+			// var req Request
+			if gen, ok := stmt.Decl.(*ast.GenDecl); ok && gen.Tok == token.VAR {
+				for _, spec := range gen.Specs {
+					vSpec, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for _, name := range vSpec.Names {
+						if name.Name == varName {
+							if vSpec.Type != nil {
+								typeName = extractTypeFromExpr(vSpec.Type)
+							} else if len(vSpec.Values) > 0 {
+								// var api = &UserAPI{}
+								typeName = extractTypeFromExpr(vSpec.Values[0])
+							}
+						}
+					}
+				}
+			}
+		}
+		return true
+	})
+	return typeName
 }

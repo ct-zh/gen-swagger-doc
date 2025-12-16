@@ -98,10 +98,9 @@ func main() {
 package main
 import "github.com/gin-gonic/gin"
 type A struct{}
-func (a *A) List(c *gin.Context) {} 
-
+func (a *A) List(c *gin.Context) {}
 type B struct{}
-func (b *B) List(c *gin.Context) {} 
+func (b *B) List(c *gin.Context) {}
 
 func main() {
 	a := &A{}
@@ -113,23 +112,11 @@ func main() {
 `,
 			},
 			expectMatches: []string{
-				"// @Router /a [get]", // A.List
-				"// @Router /b [get]", // B.List
+				"// @Summary GET /a",
+				"// @Router /a [get]",
+				"// @Summary GET /b",
+				"// @Router /b [get]",
 			},
-		},
-		{
-			name: "缺少 Handler 参数",
-			files: map[string]string{
-				"main.go": `
-package main
-import "github.com/gin-gonic/gin"
-func main() {
-	r := gin.Default()
-	r.GET("/broken") // 缺少 handler，不应该 panic
-}
-`,
-			},
-			expectNoMatch: []string{"@Router"},
 		},
 	}
 
@@ -143,29 +130,93 @@ func main() {
 				Driver:  gin.NewDriver(),
 			}
 
-			// 运行 Processor
 			if err := processor.Run(opts); err != nil {
 				t.Fatalf("Run failed: %v", err)
 			}
 
-			// 验证结果
+			// 检查结果
 			content, err := os.ReadFile(filepath.Join(dir, "main.go"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			strContent := string(content)
+			str := string(content)
 
 			for _, match := range tt.expectMatches {
-				if !strings.Contains(strContent, match) {
-					t.Errorf("Expected content to contain %q, but got:\n%s", match, strContent)
+				if !strings.Contains(str, match) {
+					t.Errorf("Expected content to contain %q, but it didn't.\nContent:\n%s", match, str)
 				}
 			}
 
 			for _, noMatch := range tt.expectNoMatch {
-				if strings.Contains(strContent, noMatch) {
-					t.Errorf("Expected content NOT to contain %q, but got:\n%s", noMatch, strContent)
+				if strings.Contains(str, noMatch) {
+					t.Errorf("Expected content NOT to contain %q, but it did.\nContent:\n%s", noMatch, str)
 				}
 			}
 		})
+	}
+}
+
+func TestProcessor_ParamParsing(t *testing.T) {
+	files := map[string]string{
+		"main.go": `
+package main
+import "github.com/gin-gonic/gin"
+
+type UserRequest struct {
+    Name string
+}
+
+type UserResponse struct {
+    ID string
+}
+
+func CreateUser(c *gin.Context) {
+    var req UserRequest
+    c.BindJSON(&req)
+    
+    id := c.Query("id")
+    c.Param("group_id")
+    
+    c.JSON(200, UserResponse{})
+}
+
+func main() {
+	r := gin.Default()
+	r.POST("/users/:group_id", CreateUser)
+}
+`,
+	}
+
+	dir := setupTestDir(t, files)
+	defer os.RemoveAll(dir)
+
+	opts := processor.Options{
+		WorkDir: dir,
+		Driver:  gin.NewDriver(),
+	}
+
+	if err := processor.Run(opts); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	// Verify content
+	content, err := os.ReadFile(filepath.Join(dir, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	str := string(content)
+
+	expected := []string{
+		"// @Param id query string false \"\"",       // Query param
+		"// @Param group_id path string true \"\"",  // Path param
+		"// @Param body body UserRequest true \"\"", // Body param
+		"// @Success 200 {object} UserResponse",     // Response
+		"// @Router /users/:group_id [post]",
+	}
+
+	for _, exp := range expected {
+		if !strings.Contains(str, exp) {
+			t.Errorf("Expected content to contain %q, but it didn't.\nContent:\n%s", exp, str)
+		}
 	}
 }

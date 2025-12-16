@@ -1,4 +1,4 @@
-# Session Checkpoint: Receiver Type Resolution & Processor Refactoring
+# Session Checkpoint: Content Enrichment (Param & Response Parsing)
 
 **Date**: 2025-12-16
 **Branch**: `ai-generated-impl`
@@ -7,36 +7,35 @@
 Building `gen-swagger-doc`, a CLI tool to inject Swagger 2.0 comments into Go source code by parsing AST and framework-specific router definitions.
 
 ## 2. Recent Achievements (Completed)
-- **Enhanced Handler Matching**: Solved the issue where methods with the same name (e.g., `A.List` and `B.List`) caused conflicts or were skipped.
-    - **Driver Layer**: Updated `pkg/driver` to support `HandlerInfoProvider`. Implemented `GetHandlerInfo` in Gin driver to resolve variable types (Receiver Type) via AST inspection.
-    - **Processor Layer**: Refactored `pkg/processor` to use a composite key (`PkgName.ReceiverType.FunctionName`) for routing mapping.
-- **Robust AST Injection**: Fixed `go/format` printing issues where injected comments were missing due to `Pos` conflicts. Implemented logic to clear `Func`, `Name`, and `Recv` position information to force re-formatting.
-- **Verification**: Updated `test/integration_test.go` to verify correct injection for same-named methods. All tests passed.
+- **Content Enrichment**: Implemented parameter and response parsing for Gin.
+    - **Param Parsing**: Extracts `c.Query`, `c.Param`, `c.BindJSON` to generate `@Param` tags.
+    - **Response Parsing**: Extracts `c.JSON` calls and infers response structs to generate `@Success` tags.
+    - **Driver Interface**: Added `FuncBodyAnalyzer` interface to `pkg/driver` to support function body analysis.
+    - **Generator**: Updated to support rich `@Param` and `@Success` generation.
+- **Verification**: Added `TestProcessor_ParamParsing` in `test/integration_test.go` to verify full injection flow.
 
 ## 3. Current Architecture State
-- **Driver Interface**: `HandlerInfo` now includes `ReceiverType`.
-- **Gin Driver**: Can resolve `api.List` -> `Receiver: UserAPI` by scanning local variable assignments.
-- **Processor**: Uses `makeHandlerKey` to uniquely identify handlers.
+- **Driver Interface**: `FuncBodyAnalyzer` allows drivers to inspect handler bodies.
+- **Gin Driver**: Implements `AnalyzeFunction` to extract params and responses.
+- **Processor**: Calls `AnalyzeFunction` during the injection phase.
 
 ## 4. Immediate Next Steps (Pending)
-The core injection logic is solid. The next phase is **Content Enrichment**.
+The core feature set is now complete. The next phase is **Refinement & Robustness**.
 
-1.  **Implement Param Parsing** (`pkg/driver/gin`):
-    - Implement `ParamParser` interface.
-    - Inspect handler function body for `c.Query`, `c.Param`, `c.JSON`, `c.ShouldBind` calls.
-    - Extract parameter names, types, and required status.
+1.  **Support More Param Types**:
+    - Support `c.PostForm`, `c.Header`.
+    - Support validation tags in struct (e.g. `binding:"required"`).
 
-2.  **Implement Response Parsing** (`pkg/driver/gin`):
-    - Implement `ResponseParser` interface.
-    - Inspect `c.JSON`, `c.XML` calls to infer response structures.
+2.  **Support More Response Types**:
+    - Support `c.XML`, `c.String`.
+    - Handle error responses (e.g. `c.AbortWithStatusJSON`).
 
-3.  **Update Processor & Generator**:
-    - Pass extracted Params/Responses to `generator.GenerateSwaggerDocs`.
-    - Update `generator` to render real `@Param` and `@Success` tags instead of placeholders.
+3.  **CLI Polish**:
+    - Add flags for overwriting existing comments (force mode).
+    - Add dry-run mode.
 
 ## 5. Key Files
-- `pkg/driver/interface.go`: Core definitions (`HandlerInfo`).
-- `pkg/driver/gin/driver.go`: Gin implementation (check `GetHandlerInfo`).
-- `pkg/processor/processor.go`: Main logic (check `Run` and `injectComments`).
-- `pkg/processor/helper.go`: Helper functions for AST type extraction.
-- `pkg/generator/generator.go`: Swagger comment template.
+- `pkg/driver/interface.go`: Added `FuncBodyAnalyzer`.
+- `pkg/driver/gin/driver.go`: Implemented `AnalyzeFunction`.
+- `pkg/processor/processor.go`: Updated to use `AnalyzeFunction`.
+- `pkg/generator/generator.go`: Updated to format `@Param` and `@Success`.
