@@ -1,4 +1,4 @@
-# Session Checkpoint: Content Enrichment (Param & Response Parsing)
+# Session Checkpoint: Release Ready (v1.0)
 
 **Date**: 2025-12-16
 **Branch**: `ai-generated-impl`
@@ -7,35 +7,24 @@
 Building `gen-swagger-doc`, a CLI tool to inject Swagger 2.0 comments into Go source code by parsing AST and framework-specific router definitions.
 
 ## 2. Recent Achievements (Completed)
-- **Content Enrichment**: Implemented parameter and response parsing for Gin.
-    - **Param Parsing**: Extracts `c.Query`, `c.Param`, `c.BindJSON` to generate `@Param` tags.
-    - **Response Parsing**: Extracts `c.JSON` calls and infers response structs to generate `@Success` tags.
-    - **Driver Interface**: Added `FuncBodyAnalyzer` interface to `pkg/driver` to support function body analysis.
-    - **Generator**: Updated to support rich `@Param` and `@Success` generation.
-- **Verification**: Added `TestProcessor_ParamParsing` in `test/integration_test.go` to verify full injection flow.
+- **Feature Completion**:
+    - **Gin Driver**: Full support for routing, params, and response parsing.
+    - **Daenerys Driver**: Full support for internal framework with nested routing and scope tracking.
+    - **CLI**: Added `-framework` flag to switch between drivers.
+- **Quality Assurance**:
+    - Passed `test/integration_test.go` (Gin).
+    - Passed `test/daenerys_test.go` (Daenerys basic).
+    - Passed `test/qa_daenerys_test.go` (Edge cases).
+- **Documentation**:
+    - Updated `README.md` with usage instructions for both frameworks.
 
 ## 3. Current Architecture State
-- **Driver Interface**: `FuncBodyAnalyzer` allows drivers to inspect handler bodies.
-- **Gin Driver**: Implements `AnalyzeFunction` to extract params and responses.
-- **Processor**: Calls `AnalyzeFunction` during the injection phase.
+- **Core**: Stable. `FileParser` and `FuncBodyAnalyzer` interfaces allow deep code analysis.
+- **CLI**: Supports dynamic driver selection.
+- **Drivers**: Decoupled and independently testable.
 
-## 4. Immediate Next Steps (Pending)
-The core feature set is now complete. The next phase is **Refinement & Robustness**.
+## 4. Next Steps (Post-Release)
+- **Feature**: Add Dry-Run mode to preview changes without writing to disk.
+- **Feature**: Support configuration file (`.swagger-gen.yaml`) for project-specific settings.
+- **Expansion**: Support Echo/Fiber frameworks.
 
-1.  **Support More Param Types**:
-    - Support `c.PostForm`, `c.Header`.
-    - Support validation tags in struct (e.g. `binding:"required"`).
-
-2.  **Support More Response Types**:
-    - Support `c.XML`, `c.String`.
-    - Handle error responses (e.g. `c.AbortWithStatusJSON`).
-
-3.  **CLI Polish**:
-    - Add flags for overwriting existing comments (force mode).
-    - Add dry-run mode.
-
-## 5. Key Files
-- `pkg/driver/interface.go`: Added `FuncBodyAnalyzer`.
-- `pkg/driver/gin/driver.go`: Implemented `AnalyzeFunction`.
-- `pkg/processor/processor.go`: Updated to use `AnalyzeFunction`.
-- `pkg/generator/generator.go`: Updated to format `@Param` and `@Success`.
