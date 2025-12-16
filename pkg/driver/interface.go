@@ -45,6 +45,20 @@ type Driver interface {
 	CheckNode(ctx *Context) (Handler, bool)
 }
 
+// FileParser 允许驱动接管整个文件的解析逻辑
+// 这是一个可选接口。如果 Driver 实现了此接口，Processor 将优先调用 ParseFile，
+// 而不再对文件中的每个节点调用 CheckNode。
+// 这对于需要分析变量作用域、路由组 (Group) 或全局配置的框架非常有用。
+type FileParser interface {
+	ParseFile(ctx *Context) []ParsedRoute
+}
+
+// ParsedRoute 包含解析出的完整路由信息
+type ParsedRoute struct {
+	HandlerInfo HandlerInfo
+	RouteInfo   RouteInfo
+}
+
 // Handler 代表一个被识别出的路由处理逻辑。
 // 具体的 Driver 实现需要返回实现此接口的对象。
 // 这是一个标记接口，具体的解析能力通过实现 Optional Parsers (Mix-ins) 来提供。
@@ -96,6 +110,12 @@ type TagsParser interface {
 // ParamParser 解析请求参数 (@Param)
 type ParamParser interface {
 	ParseParams(ctx *Context) []ParamInfo
+}
+
+// FuncBodyAnalyzer 允许驱动分析函数体以提取参数和响应信息
+// 这是一个可选接口，如果 Driver 实现了它，Processor 会在注入阶段调用
+type FuncBodyAnalyzer interface {
+	AnalyzeFunction(fn *ast.FuncDecl) ([]ParamInfo, []ResponseInfo)
 }
 
 // ResponseParser 解析响应 (@Success/@Failure)
