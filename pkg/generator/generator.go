@@ -34,11 +34,17 @@ func GenerateSwaggerDocs(route driver.RouteInfo, params []driver.ParamInfo, resp
 		if p.Required {
 			reqStr = "true"
 		}
-		
-		line := fmt.Sprintf("@Param %s %s %s %s \"%s\"", p.Name, p.In, p.Type, reqStr, p.Desc)
-		if p.Schema != "" {
-			line += " " + p.Schema
+
+		var line string
+		if p.In == "body" {
+			// Body 参数: @Param name body Schema true "desc"
+			// 注意: Body 参数通常不需要 type (string/int)，而是直接跟 Schema
+			line = fmt.Sprintf("@Param %s %s %s %s \"%s\"", p.Name, p.In, p.Schema, reqStr, p.Desc)
+		} else {
+			// 普通参数: @Param name query string true "desc"
+			line = fmt.Sprintf("@Param %s %s %s %s \"%s\"", p.Name, p.In, p.Type, reqStr, p.Desc)
 		}
+		
 		lines = append(lines, line)
 	}
 
