@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gen-swagger-doc/pkg/driver"
@@ -17,8 +18,9 @@ import (
 
 // Options 运行参数
 type Options struct {
-	WorkDir string        // 工作目录
-	Driver  driver.Driver // 驱动实例
+	WorkDir    string        // 工作目录
+	Driver     driver.Driver // 驱动实例
+	PathFilter string        // 可选：仅处理匹配此路径的路由 (例如: "/api/v1/user/strategy/async_switch")
 }
 
 // Run 执行处理流程
@@ -109,6 +111,21 @@ func Run(opts Options) error {
 
 	fmt.Printf("Found %d routes\n", len(routeMap))
 
+	// 如果指定了路径过滤器，只保留匹配的路由
+	if opts.PathFilter != "" {
+		filteredMap := make(map[string]driver.RouteInfo)
+		for key, route := range routeMap {
+			if route.Path == opts.PathFilter {
+				filteredMap[key] = route
+			}
+		}
+		if len(filteredMap) == 0 {
+			return fmt.Errorf("no routes found matching path filter: %s", opts.PathFilter)
+		}
+		routeMap = filteredMap
+		fmt.Printf("After filtering by path '%s': %d routes\n", opts.PathFilter, len(routeMap))
+	}
+
 	// 2. 注入阶段：修改 Handler 函数的注释
 	// 使用新的 FileSet，避免与第一阶段的偏移量冲突
 	injectFset := token.NewFileSet()
@@ -185,6 +202,10 @@ func injectComments(file *ast.File, fn *ast.FuncDecl, route driver.RouteInfo, pa
 	// 调用 Generator 生成标准注释
 	rawLines := generator.GenerateSwaggerDocs(route, params, responses)
 
+	// 捕获函数声明的位置，用于设置注释的位置
+	// 使用 fn.Pos() (即 "func" 关键字的位置) 之前的位置
+	pos := fn.Pos()
+
 	if fn.Doc == nil {
 		fn.Doc = &ast.CommentGroup{}
 		// 关键修复: 如果创建了新的 Doc，必须将其添加到 file.Comments 中，
@@ -204,10 +225,16 @@ func injectComments(file *ast.File, fn *ast.FuncDecl, route driver.RouteInfo, pa
 	// 追加注释
 	for _, line := range rawLines {
 		fn.Doc.List = append(fn.Doc.List, &ast.Comment{
-			// Slash: fn.Pos() - 1, // 移除 Hack，看看原始行为
-			Text: "// " + line,
+			Slash: pos - 1, // 设置正确的位置，避免位置错乱导致 printer 打印到错误位置
+			Text:  "// " + line,
 		})
 	}
+
+	// 重新排序 file.Comments，确保所有注释按位置顺序排列
+	// 这对 go/printer 正确打印注释至关重要，特别是当我们在列表末尾添加了位置靠前的注释时
+	sort.Slice(file.Comments, func(i, j int) bool {
+		return file.Comments[i].Pos() < file.Comments[j].Pos()
+	})
 
 	// 强制清除 Func 关键字和函数名的位置信息，使 printer 重新排版
 	// 这样可以确保新添加的 Doc 注释被正确打印
