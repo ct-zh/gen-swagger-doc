@@ -35,14 +35,20 @@ func GenerateSwaggerDocs(route driver.RouteInfo, params []driver.ParamInfo, resp
 			reqStr = "true"
 		}
 
+		// Fix: 如果描述为空，使用参数名作为默认描述，避免 swag init 报错
+		desc := p.Desc
+		if strings.TrimSpace(desc) == "" {
+			desc = p.Name
+		}
+
 		var line string
 		if p.In == "body" {
 			// Body 参数: @Param name body Schema true "desc"
 			// 注意: Body 参数通常不需要 type (string/int)，而是直接跟 Schema
-			line = fmt.Sprintf("@Param %s %s %s %s \"%s\"", p.Name, p.In, p.Schema, reqStr, p.Desc)
+			line = fmt.Sprintf("@Param %s %s %s %s \"%s\"", p.Name, p.In, p.Schema, reqStr, desc)
 		} else {
 			// 普通参数: @Param name query string true "desc"
-			line = fmt.Sprintf("@Param %s %s %s %s \"%s\"", p.Name, p.In, p.Type, reqStr, p.Desc)
+			line = fmt.Sprintf("@Param %s %s %s %s \"%s\"", p.Name, p.In, p.Type, reqStr, desc)
 		}
 		
 		lines = append(lines, line)

@@ -51,6 +51,19 @@ func TestGenerateSwaggerDocs(t *testing.T) {
 				"@Router /users [post]",
 			},
 		},
+		{
+			name: "With Empty Description Params",
+			route: driver.RouteInfo{
+				Method: "GET",
+				Path:   "/test",
+			},
+			params: []driver.ParamInfo{
+				{Name: "uid", In: "query", Type: "integer", Required: true, Desc: ""},
+			},
+			want: []string{
+				"@Param uid query integer true \"uid\"",
+			},
+		},
 	}
 
 	for _, tt := range tests {
