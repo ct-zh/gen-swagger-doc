@@ -15,6 +15,7 @@ import (
 func main() {
 	dir := flag.String("dir", ".", "Directory to scan (absolute or relative path)")
 	framework := flag.String("framework", "gin", "Framework to use: 'gin' or 'daenerys'")
+	include := flag.String("include", "", "Optional: Only process routes matching this path (e.g. /api/v1/user)")
 	flag.Parse()
 
 	// 1. Resolve absolute working directory
@@ -48,6 +49,7 @@ func main() {
 	opts := processor.Options{
 		WorkDir: workDir,
 		Driver:  d,
+		PathFilter: *include,
 	}
 
 	if err := processor.Run(opts); err != nil {

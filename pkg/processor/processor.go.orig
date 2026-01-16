@@ -57,10 +57,6 @@ func Run(opts Options) error {
 			}
 			parsedRoutes := fileParser.ParseFile(ctx)
 			for _, pr := range parsedRoutes {
-				// 如果开启了过滤器，只收集匹配的路由
-				if opts.PathFilter != "" && pr.RouteInfo.Path != opts.PathFilter {
-					continue
-				}
 				key := makeHandlerKey(pr.HandlerInfo)
 				routeMap[key] = pr.RouteInfo
 			}
